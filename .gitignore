@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+
+# Job bundles and outputs (built by job/make_bundle*.sh or written by local runs)
+bench/job/_bundle/
+bench/job/_bundle_r3/
+/results_local/
+/work/
+*.tmp
+*.log
+*.mp4
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
