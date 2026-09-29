@@ -13,12 +13,16 @@ The animation shows streaming, the case where stacking helps most. The bars use 
 
 ## Answer
 
+**Preliminary: one dataset so far.** More datasets are next (see [Next](#next)).
+
 Yes, in most cases. Stacking wins for two reasons:
 
 1. **Less CPU.** The reader decodes 1 video instead of 3. This makes it 1.4x to 1.9x faster.
 2. **Fewer things to keep open.** You need 3x fewer files, decoders and network requests. This matters when many workers read at once.
 
 Stacking does **not** make a single network read faster. With one reader and files of the same size, stacked and separate files are equally fast.
+
+The biggest effect (67x when the decoder cache overflows) can be fixed in the reader, with no format change: size the cache to the number of open files.
 
 ## What we tested
 
@@ -90,11 +94,26 @@ Dataset: [`lerobot/abc_130k_v3_train`](https://huggingface.co/datasets/lerobot/a
 - One dataset: small frames (224 px) and 3 cameras.
 - The 8-reader row is a single run.
 
+## Next
+
+One dataset with small frames is not enough to decide on the format. The same benchmark will run on popular datasets that each test one open question:
+
+| Dataset | Cameras | Frame size | What it tests |
+|---|---|---|---|
+| [`lerobot/droid_1.0.1`](https://huggingface.co/datasets/lerobot/droid_1.0.1) | 3 | 180 × 320 | A very large dataset (95k episodes) |
+| [`allenai/MolmoAct2-BimanualYAM-Dataset`](https://huggingface.co/datasets/allenai/MolmoAct2-BimanualYAM-Dataset) | 3 | 360 × 640 | Bigger frames |
+| [`lerobot/libero`](https://huggingface.co/datasets/lerobot/libero) | 2 | 256 × 256 | A common training benchmark |
+| [`lerobot/high_quality_folding`](https://huggingface.co/datasets/lerobot/high_quality_folding) | 3 | 480 × 640 and 720 × 1280 | Cameras of different sizes (padding) |
+
+Also planned: reading only some cameras, and one training run that measures step time, to see if data loading limits training.
+
+Status updates go on the DATA-11 claim in [#3832](https://github.com/huggingface/lerobot/issues/3832#issuecomment-5823194668).
+
 ## Follow-up questions
 
 1. **For the DATA-03 owners:** is stacking planned? If yes, what happens to cameras of different sizes: pad, or refuse to stack?
 2. Can a reader get the CPU gain without a format change, by decoding 3 separate files in one batched call?
-3. Does the gain hold for bigger frames (480p, 720p) and for more cameras (ALOHA has 4)?
+3. Does the gain hold for bigger frames and for more cameras? The [Next](#next) datasets test this.
 4. How many workers do large LeRobot training runs use? That decides how often the cache overflows.
 5. Should stacking be an option when recording, a conversion tool for existing datasets, or both?
 6. With a #3917 pool that swaps episodes, does 1 request per episode instead of 3 matter?
