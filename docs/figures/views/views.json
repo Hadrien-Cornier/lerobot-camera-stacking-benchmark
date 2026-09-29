@@ -1,0 +1,17 @@
+{
+ "frame": 1500,
+ "revision": "b4a3426ab4b1105ecd2caf2e747019af898a6e5d",
+ "psnr_db": {
+  "top": 44.7,
+  "left_wrist": 40.9,
+  "right_wrist": 43.1
+ },
+ "size_before": [
+  224,
+  224
+ ],
+ "size_after": [
+  224,
+  672
+ ]
+}

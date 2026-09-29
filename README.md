@@ -4,6 +4,13 @@ This repo tests one idea from the LeRobot roadmap ([#3832](https://github.com/hu
 
 > Put the 3 camera views of a robot in **one** video file (stacked into one tall image) instead of **3** files. Does training read data faster?
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/loading-dark.svg">
+  <img src="docs/figures/loading.svg" alt="Animation: now, each training frame needs 3 files and 3 decode calls, one after another (5.5 ms of CPU). Stacked, it needs 1 file and 1 decode call (2.9 ms). In 11 ms, separate files finish 2 frames and stacked finishes 3.8.">
+</picture>
+
+The animation shows streaming, the case where stacking helps most. The bars use the measured CPU time per frame.
+
 ## Answer
 
 Yes, in most cases. Stacking wins for two reasons:
@@ -13,7 +20,35 @@ Yes, in most cases. Stacking wins for two reasons:
 
 Stacking does **not** make a single network read faster. With one reader and files of the same size, stacked and separate files are equally fast.
 
+## What we tested
+
+Stacking puts the 3 camera images of one moment into one tall image. The reader cuts it back into 3 images.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/views-dark.svg">
+  <img src="docs/figures/views.svg" alt="One real frame. Before: 3 separate 224 x 224 images (top, left wrist, right wrist), each in its own MP4 file. After: one 224 x 672 image with the 3 views stacked, cut back into 3 at fixed rows.">
+</picture>
+
+We stored the same frames in 5 layouts. The main comparison is SEP (today) vs STACK.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/layouts-dark.svg">
+  <img src="docs/figures/layouts.svg" alt="The 5 layouts: SEP (one file per camera), STACK (3 views in one tall video), BIG (SEP with 3x longer files), MULTI (one file with 3 video tracks), and equal size (STACK and MULTI cut to SEP's file size).">
+</picture>
+
+We read them in the 3 ways training reads videos.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/read-modes-dark.svg">
+  <img src="docs/figures/read-modes.svg" alt="The 3 read patterns: streaming reads each file forward, random access jumps to any frame, and PR #3917 downloads whole episodes into a RAM pool.">
+</picture>
+
 ## Results
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/figures/results-dark.svg">
+  <img src="docs/figures/results.svg" alt="Bar chart of the results table below: stacked vs separate files for each read pattern.">
+</picture>
 
 Dataset: [`lerobot/abc_130k_v3_train`](https://huggingface.co/datasets/lerobot/abc_130k_v3_train). It has 3 cameras (top, left wrist, right wrist) and is stored in LeRobot's default format (AV1, a keyframe every 2 frames). All reads go over `hf://` from a Hugging Face Jobs machine (`cpu-upgrade`, 8 CPUs). Each number is the mean of 3 runs, ± a 95% confidence interval.
 
@@ -30,6 +65,11 @@ Dataset: [`lerobot/abc_130k_v3_train`](https://huggingface.co/datasets/lerobot/a
 
 - **Streaming reads each file forward.** One 5 MB download serves about 1,700 frames, so the network costs almost nothing. What is left is decoding, and stacked needs 1 decode call instead of 3.
 - **The decoder cache holds 100 open files per worker.** With `lerobot-train`, each worker keeps about `3 × num_workers` files open for separate cameras. Past about 34 workers the cache overflows. Separate files then reopen a file for almost every frame, and speed falls to 4.6 frames/s. Stacked needs 3x fewer open files, so it overflows only past about 100 workers.
+
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/figures/cache-dark.svg">
+    <img src="docs/figures/cache.svg" alt="Decoder cache: with 24 files in use and 12 slots, separate files hit the cache half the time (4.6 frames/s). Stacked uses 8 files, all fit (308 frames/s).">
+  </picture>
 - **#3917 downloads one episode per camera in one request.** Both layouts download the same bytes (24 vs 25 MB per episode). Stacked wins on CPU.
 - **Random access with 1 reader waits on one request at a time.** Stacked sends 1 request per sample and separate files send 3, but the 3 go out at the same time, so the wait is the same.
 - **With 8 readers, the number of requests counts.** Separate files sent 219 requests/s, stacked sent 107.
@@ -68,6 +108,7 @@ We also tested faster readers (exact byte ranges, opening files outside the deco
 - [`METHOD.md`](METHOD.md): how we measured, the job ids and the cost.
 - [`bench/`](bench/): the code. It runs on Hugging Face Jobs, and one round costs under $0.10. See [`bench/README.md`](bench/README.md).
 - [`results/`](results/): summaries and raw numbers for each round.
+- [`docs/figures/`](docs/figures/): the figures. `make_figures.py` draws them (no dependencies). `grab_views.py` decodes the real frame shown above.
 - Test videos: [`hadriencornier/lerobot-camera-stacking-benchmark`](https://huggingface.co/datasets/hadriencornier/lerobot-camera-stacking-benchmark) on the Hub.
 
 Source data: `lerobot/abc_130k_v3_train` (Apache-2.0), from the ABC project ([paper](https://arxiv.org/abs/2606.27375), [code](https://github.com/amazon-far/abc)). This repo is Apache-2.0.
