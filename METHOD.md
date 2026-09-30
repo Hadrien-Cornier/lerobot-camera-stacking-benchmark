@@ -28,6 +28,8 @@ The test videos are public: [`hadriencornier/lerobot-camera-stacking-benchmark`]
 | 1 | Local decode model. Random access over `hf://` with the default 5 MB blocks. STACK files held the same frames as SEP, so they were 3x bigger. | `6ab5e1dc52d0dbd7f1d8df2a` | 1 h 45 min | about $0.05 |
 | 2 | Real `StreamingLeRobotDataset` (with the fix from [#4702](https://github.com/huggingface/lerobot/pull/4702)). Random access with block sizes from 64 KB to 5 MB, reused file lookups, exact byte ranges, and 8 readers. | `6ab69b4b6b030d633f691998` | 61 min | about $0.035 |
 | 3 | Equal-size files, file size vs request time inside Hugging Face, and [#3917](https://github.com/huggingface/lerobot/pull/3917) on SEP vs STACK. | `6ab6bd546b030d633f691efe` | 37 min | about $0.03 |
+| 4 | 4 more datasets: droid, MolmoAct2, libero, high_quality_folding. SEP vs STACK vs 1 camera, streaming over `hf://` and map-style with `lerobot-train` DataLoader settings. lerobot at `32b671d4` (#4702 head). | droid `6abc6e8d031314b6963434f1`, molmo `6abc6e8e031314b6963434f3`, libero `6abc6e8f4c46ef198703401d`, hqf `6abc6e90031314b6963434f5`, smoke `6abc6c05031314b696343495` | 40 to 52 min each | about $0.10 |
+| 4 GPU | Training step time for ACT and SmolVLA with synthetic batches (lerobot `e0d50211`). | A100 `6abc66bc031314b696343423`, L4 `6abc66bb4c46ef1987033e62` | 9 and 16 min | about $0.60 |
 
 The README takes each number from the round that measured it best:
 - streaming: round 2;
@@ -46,6 +48,7 @@ Round 1 and round 2 random-access numbers used 3x bigger STACK and MULTI files, 
 - **#3917:** samples/s over the second half of each 300 s run, once the episode pool is full.
   - #3917 allows 1 DataLoader worker per process, so "8 processes" means 8 separate processes.
 - **Requests and bytes:** we count every HTTP request `huggingface_hub` sends, by type (lookup, download), and every byte.
+- **Round 4:** each job slices whole consecutive episodes (up to 60,000 frames) from the pinned source, re-encodes them with LeRobot's defaults, and builds 3 small LeRobot v3 datasets (SEP, STACK, SEP1 with 1 camera), each with 8 copies of the slice. Streaming arms run in one process, interleaved, 5 repeats. Map-style arms use batch 8, `EpisodeAwareSampler(shuffle=True)`, prefetch 4, persistent workers, spawn and `return_uint8=True`, 4 repeats. The "cemu" cache is `round(100 × 8 / real files per camera)`, so the slice sees the same cache share as the full dataset. State and action values are random; only their shapes match.
 - **Repeats:** 3 per arm. The ± values are 95% confidence intervals (Student t). 8-reader arms ran once.
 
 ## One rule we learned
@@ -53,6 +56,7 @@ Round 1 and round 2 random-access numbers used 3x bigger STACK and MULTI files, 
 The same files can run 2x faster or slower from one job to the next: 6.8 samples/s in round 2, 13.6 in round 3. So we compare layouts **only inside the same job**. Numbers from different jobs are never compared.
 
 ## Checks
+- Round 4: on all 4 datasets, remote reads matched local reads bit for bit, camera order was right, and LeRobot returned the file frames (60 of 60). Stacked views vs source: 38 to 44 dB mean PSNR, within 1 dB of separate files. On droid, the worst frame was just under our 35 dB flag for both layouts (34.95 dB separate, 34.97 dB stacked).
 
 - Every remote decode matched a local decode, bit for bit: 112 of 112 in round 2, 52 of 52 in round 3.
 - The r3 cuts have the same frames, timestamps and packet bytes as the originals: 18 of 18 files.

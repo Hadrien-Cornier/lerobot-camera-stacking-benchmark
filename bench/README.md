@@ -87,6 +87,24 @@ Script: `job/entrypoint_r3.sh`.
 | size2 | `r3_size.py` | The size check again, at the end. |
 | summary | `r3_summary.py` | Writes `summary.md`. |
 
+## Round 4: 4 more datasets, and GPU step time
+
+Script: `job/entrypoint_r4.sh`, one job per dataset (`R4_DATASET` = `droid`, `molmo`, `libero` or `hqf`).
+
+| stage | script | what it does |
+|---|---|---|
+| slice | `r4_slice.py` | Reads the real file stats and takes whole consecutive episodes (up to `R4_MAX_FRAMES`, default 60,000) from the first video file of every camera. |
+| encode | `r4_encode.py` | Decodes once, then writes SEP and STACK with LeRobot's default encoder. Pads cameras of different sizes. |
+| build | `r4_build.py` | Builds 3 small LeRobot v3 datasets (SEP, STACK, SEP1 with 1 camera), 8 copies of the slice each, and uploads them as private repos named `R4_REPO_PREFIX-<ds>-{sep,stack,sep1}`. Set `R4_REPO_PREFIX` to your own namespace. |
+| check | `r4_check.py` | PSNR, camera order, `hf://` == local, and a read back through `LeRobotDataset`. |
+| stream | `r4_stream.py` | `StreamingLeRobotDataset` over `hf://`, plus a DataLoader shard audit. |
+| map | `r4_map.py` | Map-style `LeRobotDataset` on the local copies, with `lerobot-train` DataLoader settings. |
+| summary | `r4_summary.py` | Writes `summary.md`. |
+
+`LEROBOT_SHA` pins LeRobot. Round 4 used `32b671d437f8c50014f74a322ad3df09c6fab944`, the head of [#4702](https://github.com/huggingface/lerobot/pull/4702), because streaming on `main` breaks after the first file of a multi-file dataset.
+
+`r4train_bench.py` (script `job/entrypoint_r4train.sh`) times training steps of ACT and SmolVLA on a GPU with synthetic batches of each dataset's shapes.
+
 ## Launch
 
 Run these from this folder. First build the bundle (the scripts plus `SHA256SUMS`) and upload it to your results repo. The job downloads it and checks the checksums.
@@ -139,6 +157,31 @@ hf jobs run --detach --name camera-stacking-r3 --flavor cpu-upgrade --timeout 2h
   bash -c 'set -e; pip install -q --root-user-action=ignore "huggingface_hub>=1.0"; hf download "$RESULTS_REPO" --repo-type dataset --include "bundle-r3/*" --local-dir /work/dl_bundle >/dev/null; exec bash /work/dl_bundle/bundle-r3/job/entrypoint_r3.sh'
 ```
 
+Round 4, one job per dataset (the settings used for `results/round4`):
+
+```bash
+bash job/make_bundle_r4.sh
+hf upload "$RESULTS_REPO" job/_bundle_r4 bundle-r4 --repo-type dataset --private
+hf jobs run --detach --name camera-stacking-r4-droid --flavor cpu-upgrade --timeout 3h \
+  --secrets HF_TOKEN --env RESULTS_REPO="$RESULTS_REPO" --env R4_DATASET=droid \
+  --env LEROBOT_SHA=32b671d437f8c50014f74a322ad3df09c6fab944 --env R4_STREAM_REPEATS=5 --env R4_MAP_REPEATS=4 \
+  --env R4_REPO_PREFIX=<your-user>/camera-stacking-r4 \
+  python:3.12-slim-trixie \
+  bash -c 'set -e; pip install -q --root-user-action=ignore "huggingface_hub>=1.0,<2"; hf download "$RESULTS_REPO" --repo-type dataset --include "bundle-r4/*" --local-dir /work/dl >/dev/null; exec bash /work/dl/bundle-r4/job/entrypoint_r4.sh'
+```
+
+Round 4 GPU step time (A100; use `--flavor l4x1 --env FLAVOR_TAG=l4 --env R4T_BUDGET_S=720 --env R4T_RUN_TIMEOUT_S=360` for the L4):
+
+```bash
+bash job/make_bundle_r4train.sh
+hf upload "$RESULTS_REPO" job/_bundle_r4train bundle-r4train --repo-type dataset --private
+hf jobs run --detach --name camera-stacking-r4train-a100 --flavor a100-large --timeout 45m \
+  --secrets HF_TOKEN --env RESULTS_REPO="$RESULTS_REPO" --env FLAVOR_TAG=a100 \
+  --env PIP_BREAK_SYSTEM_PACKAGES=1 --env R4T_BUDGET_S=420 --env R4T_RUN_TIMEOUT_S=300 \
+  pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime \
+  bash -c 'set -e; python3 -m pip install -q --root-user-action=ignore "huggingface_hub>=1.0,<2"; hf download "$RESULTS_REPO" --repo-type dataset --include "bundle-r4train/*" --local-dir /work/dl >/dev/null; exec bash /work/dl/bundle-r4train/job/entrypoint_r4train.sh'
+```
+
 ## Watch a job
 
 ```bash
@@ -153,7 +196,7 @@ The job refuses to run twice with the same job id. HF Jobs restarts a container 
 
 ## Time and cost
 
-`cpu-upgrade` costs about $0.03 per hour. The original runs took:
+`cpu-upgrade` costs about $0.03 per hour, `a100-large` $2.50 and `l4x1` $0.80. The original runs took:
 
 | run | wall time | cost |
 |---|---|---|
@@ -161,6 +204,9 @@ The job refuses to run twice with the same job id. HF Jobs restarts a container 
 | round 1 main | 1 h 46 min | about $0.05 |
 | round 2 | 1 h 1 min | about $0.03 |
 | round 3 | 37 min | about $0.02 |
+| round 4, per dataset | 40 to 52 min | about $0.03 |
+| round 4 GPU, A100 | 9 min | about $0.38 |
+| round 4 GPU, L4 | 16 min | about $0.22 |
 
 With the default `VARIANTS_REPO`, rounds 2 and 3 take a few minutes longer, for the copy into `RESULTS_REPO`.
 

@@ -607,6 +607,64 @@ def results(theme):
                                for r in RESULTS))
 
 
+# ---------------------------------------------------------------- 5b. across datasets
+
+# Stacked / separate speed. Streaming: StreamingLeRobotDataset, 1 process, cache 100, frames/s.
+# Map-style: LeRobotDataset, 4 workers, cache 100, samples/s. Sources: results/round4/*/summary.md
+# (SEP_S8_c100, STACK_S8_c100, SEP_w4_c100, STACK_w4_c100) and results/round2 for ABC.
+# (name, cameras, pixels per sample, streaming SEP, STACK, map SEP, STACK)
+DATASETS = [
+    ("libero", "2 × 256×256", 131_072, 367.5, 487.9, 965.2, 1138.8),
+    ("ABC", "3 × 224×224", 150_528, 181.5, 342.2, None, None),
+    ("droid_1.0.1", "3 × 180×320", 172_800, 221.5, 328.4, 764.2, 860.0),
+    ("MolmoAct2", "3 × 360×640", 691_200, 144.6, 179.4, 510.5, 381.7),
+    ("high_quality_folding", "2 × 720p + 480×640", 2_150_400, 70.9, 71.0, 247.7, 168.9),
+]
+
+
+def datasets(theme):
+    import math
+
+    W, RH, top = 960, 64, 128
+    H = top + RH * len(DATASETS) + 70
+    o = [header("Stacked vs separate files, 5 datasets",
+                "How much faster stacked is. Right of 1x: stacked wins. Sorted by pixels per sample.")]
+    lx = 600
+    o.append(rect(lx, 30, 12, 12, fill="{stack}", rx=3) + text(lx + 18, 40, "Streaming, 1 process", 13, fill="ink2"))
+    o.append(rect(lx + 170, 30, 12, 12, fill="{cam1}", rx=3) + text(lx + 188, 40, "Map-style, 4 workers", 13, fill="ink2"))
+    CX, S = 640, 190  # x of 1x, pixels per doubling
+    for r, lab in [(0.5, "0.5x"), (0.75, "0.75x"), (1, "1x"), (1.5, "1.5x"), (2, "2x")]:
+        x = CX + math.log2(r) * S
+        o.append(f'<line x1="{x:.1f}" y1="{top - 4}" x2="{x:.1f}" y2="{top + RH * len(DATASETS)}" '
+                 f'stroke="{{{"axis" if r == 1 else "grid"}}}" stroke-width="{1.5 if r == 1 else 1}"/>')
+        o.append(text(x, top - 12, lab, 12, fill="muted", anchor="middle"))
+    for i, (name, cams, px, ss, sk, ms, mk) in enumerate(DATASETS):
+        y = top + i * RH
+        o.append(text(32, y + 26, name, 14, weight=600))
+        o.append(text(32, y + 46, f"{cams}, {px / 1e6:.2f} MP", 13, fill="muted"))
+        for j, (a, b, col) in enumerate([(ss, sk, "{stack}"), (ms, mk, "{cam1}")]):
+            by = y + 12 + j * 22
+            if a is None:
+                o.append(text(CX + 8, by + 14, "not run", 12.5, fill="muted"))
+                continue
+            r = b / a
+            x = CX + math.log2(r) * S
+            if r >= 1:
+                o.append(bar_h(CX, by, max(x - CX, 2), 18, col))
+                o.append(text(max(x, CX + 2) + 8, by + 14, f"{r:.2f}x", 12.5, fill="ink2"))
+            else:
+                w = CX - x
+                o.append(f'<g transform="translate({2 * CX:.1f},0) scale(-1,1)">{bar_h(CX, by, w, 18, col)}</g>')
+                o.append(text(x - 8, by + 14, f"{r:.2f}x", 12.5, fill="ink2", anchor="end"))
+    o.append(text(32, H - 40, "Streaming reads cameras one after another, so stacking saves a fixed cost per camera. "
+                  "It matters less as frames grow.", 12.5, fill="muted"))
+    o.append(text(32, H - 20, "Map-style already decodes each camera in its own thread, so separate files use more "
+                  "cores. Hugging Face Jobs, 8 CPUs.", 12.5, fill="muted"))
+    return page(W, H, "".join(o), theme, title="Stacked vs separate files, 5 datasets",
+                desc="; ".join(f"{d[0]}: streaming {d[4] / d[3]:.2f}x"
+                               + (f", map-style {d[6] / d[5]:.2f}x" if d[5] else "") for d in DATASETS))
+
+
 # ---------------------------------------------------------------- 6. camera views
 
 
@@ -680,5 +738,6 @@ if __name__ == "__main__":
     save("read-modes", read_modes)
     save("cache", cache)
     save("results", results)
+    save("datasets", datasets)
     save("views", views)
     print("wrote", sorted(p.name for p in OUT.glob("*.svg")))
